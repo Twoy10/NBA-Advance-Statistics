@@ -1,0 +1,321 @@
+-- this query presents the following metrics of curry, lebron and durant for seasons 2003 to 2021
+--1. PPG
+--2. APG
+--3. RPG
+--4. SPG
+--5. BPG
+--6. TO per game
+--7. Personal fouls per game
+--8. games played per season
+--9. career Field goal%
+--10. career 3points %
+--11. career FT%
+--12. TS% [ Points / (2 * (FGA + 0.44 * FTA))
+--13. eFG% [ (FGM + 0.5 * 3PM) / FGA]
+--14. TO% [ Turnovers / (FGA + 0.44 * FTA + TO)]
+--15. AVG +/-
+--16. Assist Turnover Ratio [ AST / TO ]
+--17. Points Per Shot Attempt [ PTS / (FGA + 0.44 × FTA) ]
+--18. Usage Rate [(FGA + 0.44 × FTA + TO) / (Team Possessions)]
+-- team possession = 0.5 × [ (Team FGA + 0.44 × Team FTA + Team TO – Team OREB) + (Opponent FGA + 0.44 × Opponent FTA + Opponent TO – Opponent OREB) ]
+
+-- this also presents the following team metrics for teams played by curry, bron and KD for seasons 2003 to 2021
+--1. PPG
+--2. APG
+--3. RPG
+--4. SPG
+--5. BPG
+--6. TO per game
+--7. Personal fouls per game
+--8. TS%
+--9. eFG 
+--10. TO%
+--11. Assist Turnover Ratio
+
+WITH game_ids AS (
+	SELECT g.game_id 
+	FROM games_details AS gd
+	JOIN games AS g
+	ON g.game_id = gd.game_id
+	WHERE (
+	PLAYER_NAME ILIKE '%STEPHEN CURRY%' OR
+	PLAYER_NAME ILIKE '%LEBRON JAMES%' OR
+	PLAYER_NAME ILIKE '%KEVIN DURANT%'
+	) AND 
+	((g.GAME_DATE_EST BETWEEN '2003-10-28' AND '2004-04-14')
+    OR (g.GAME_DATE_EST BETWEEN '2004-10-27' AND '2005-04-20')
+    OR (g.GAME_DATE_EST BETWEEN '2005-11-01' AND '2006-04-19')
+    OR (g.GAME_DATE_EST BETWEEN '2006-11-01' AND '2007-04-18')
+    OR (g.GAME_DATE_EST BETWEEN '2007-10-30' AND '2008-04-16')
+    OR (g.GAME_DATE_EST BETWEEN '2008-10-28' AND '2009-04-15')
+    OR (g.GAME_DATE_EST BETWEEN '2009-10-27' AND '2010-04-14')
+    OR (g.GAME_DATE_EST BETWEEN '2010-10-26' AND '2011-04-13')
+    OR (g.GAME_DATE_EST BETWEEN '2011-12-25' AND '2012-04-26')
+    OR (g.GAME_DATE_EST BETWEEN '2012-10-30' AND '2013-04-17')
+    OR (g.GAME_DATE_EST BETWEEN '2013-10-29' AND '2014-04-16')
+    OR (g.GAME_DATE_EST BETWEEN '2014-10-28' AND '2015-04-15')
+    OR (g.GAME_DATE_EST BETWEEN '2015-10-27' AND '2016-04-13')
+    OR (g.GAME_DATE_EST BETWEEN '2016-10-25' AND '2017-04-12')
+    OR (g.GAME_DATE_EST BETWEEN '2017-10-17' AND '2018-04-11')
+    OR (g.GAME_DATE_EST BETWEEN '2018-10-16' AND '2019-04-10')
+    OR (g.GAME_DATE_EST BETWEEN '2019-10-22' AND '2020-03-11')
+    OR (g.GAME_DATE_EST BETWEEN '2020-12-22' AND '2021-05-16')
+    OR (g.GAME_DATE_EST BETWEEN '2021-10-19' AND '2022-04-10') 
+	)
+),
+	
+inputs AS (
+	SELECT gd.PLAYER_NAME, g.season, gd.team_abbreviation,
+	ROUND (AVG (gd.pts),2) AS PPG,
+	ROUND (AVG (gd.AST),2) AS APG,
+	ROUND (AVG (gd.REB),2) AS RPG,
+	ROUND (AVG (gd.STL),2) AS SPG,
+	ROUND (AVG (gd.BLK),2) AS BPG,
+	ROUND (AVG (gd.TO),2) AS TOPG,
+	ROUND (AVG (gd.PF),2) AS PFPG,
+	COUNT (gd.PLAYER_NAME) AS games_played,
+	SUM (gd.pts) AS total_pts,
+	SUM (gd.FGM) AS total_FGM,
+	SUM (gd.FGA) AS total_FGA,
+	SUM (gd.FTM) AS total_FTM,
+	SUM (gd.FTA) AS total_FTA,
+	SUM (gd.FG3M) AS total_3PM,
+	SUM (gd.FG3A) AS total_3PA,
+	SUM (gd.TO) AS total_turnover,
+	ROUND (AVG (PLUS_MINUS),2) AS AVG_plus_minus,
+	SUM (gd.AST) AS total_AST
+	FROM games_details AS gd
+	JOIN games AS g
+	ON gd.game_id = g.game_id
+	WHERE g.game_id IN (
+	SELECT *
+	FROM game_ids
+	) AND 
+	(
+	gd.PLAYER_NAME ILIKE '%STEPHEN CURRY%' OR
+	gd.PLAYER_NAME ILIKE '%LEBRON JAMES%' OR
+	gd.PLAYER_NAME ILIKE '%KEVIN DURANT%'
+	)
+	GROUP BY g.season, gd.PLAYER_NAME,gd.team_abbreviation
+	ORDER BY g.season
+),
+
+career_pct AS (
+	SELECT PLAYER_NAME, 
+	SUM (total_FGM) AS FGM,
+	SUM (total_FGA) AS FGA,
+	ROUND (FGM / FGA,2) AS career_FG,
+	SUM (total_FTM) AS FTM,
+	SUM (total_FTA) AS FTA,
+	ROUND (FTM / FTA,2) AS career_FT,
+	SUM (total_3PM) AS threePM,
+	SUM (total_3PA) AS threePA,
+	ROUND (threePM / threePA,2) AS career_3FG	
+	FROM inputs
+	GROUP BY PLAYER_NAME
+),
+
+possessions_inputs AS (
+	SELECT g.game_id AS game_id,
+	g.game_date_est AS date,
+	g.season AS season,
+    MAX(CASE WHEN g.home_team_id = gd.team_id THEN gd.team_abbreviation ELSE NULL END) AS home_team,
+	SUM (CASE WHEN g.home_team_id = gd.team_id THEN gd.FGA ELSE NULL END) AS home_team_FGA,
+	SUM (CASE WHEN g.home_team_id = gd.team_id THEN gd.FTA ELSE NULL END) AS home_team_FTA,
+	SUM (CASE WHEN g.home_team_id = gd.team_id THEN gd.TO ELSE NULL END) AS home_team_TO,
+	SUM (CASE WHEN g.home_team_id = gd.team_id THEN gd.OREB ELSE NULL END) AS home_team_OREB, 
+
+	MAX (CASE WHEN g.visitor_team_id = gd.team_id THEN gd.team_abbreviation ELSE NULL END) AS away_team,
+	SUM (CASE WHEN g.visitor_team_id = gd.team_id THEN gd.FGA ELSE NULL END) AS away_team_FGA,
+	SUM (CASE WHEN g.visitor_team_id = gd.team_id THEN gd.FTA ELSE NULL END) AS away_team_FTA,
+	SUM (CASE WHEN g.visitor_team_id = gd.team_id THEN gd.TO ELSE NULL END) AS away_team_TO,
+	SUM (CASE WHEN g.visitor_team_id = gd.team_id THEN gd.OREB ELSE NULL END) AS away_team_OREB
+	FROM games_details AS gd
+	JOIN games AS g
+	ON gd.game_ID = g.game_ID
+	WHERE g.game_id IN (
+	SELECT *
+	FROM game_ids
+	)
+	GROUP BY g.game_date_est, g.game_id, g.season
+	ORDER BY date ASC
+),
+
+possessions_initial AS (
+	SELECT game_id, date, season,
+	home_team, 
+	0.5 * (home_team_FGA + 0.44 * home_team_FTA + home_team_TO - home_team_OREB) + (away_team_FGA + 0.44 * away_team_FTA + away_team_TO - away_team_OREB) AS home_team_possession,
+	away_team,
+	0.5 * (away_team_FGA + 0.44 * away_team_FTA + away_team_TO - away_team_OREB) + (home_team_FGA + 0.44 * home_team_FTA + home_team_TO - home_team_OREB) AS away_team_possession	
+	FROM possessions_inputs
+	ORDER BY date
+),
+
+possessions_final AS (
+	SELECT game_id, season, home_team AS team, home_team_possession AS possession
+	FROM possessions_initial
+	UNION
+	SELECT game_id, season, away_team AS team, away_team_possession AS possession
+	FROM possessions_initial
+),
+
+curry_possessions AS (
+	SELECT pf.season, 
+	SUM(pf.possession) AS total_possessions
+	FROM possessions_final AS pf
+	JOIN games_details AS gd
+	ON pf.game_id = gd.game_id
+	WHERE gd.PLAYER_NAME ILIKE '%STEPHEN CURRY%'
+  	AND pf.team = gd.team_abbreviation
+	GROUP BY pf.season
+),
+
+lebron_possessions AS (
+	SELECT pf.season, 
+	SUM(pf.possession) AS total_possessions
+	FROM possessions_final AS pf
+	JOIN games_details AS gd
+	ON pf.game_id = gd.game_id
+	WHERE gd.PLAYER_NAME ILIKE '%LEBRON JAMES%'
+  	AND pf.team = gd.team_abbreviation
+	GROUP BY pf.season
+),	
+
+
+kd_possessions AS (
+	SELECT pf.season, 
+	SUM(pf.possession) AS total_possessions
+	FROM possessions_final AS pf
+	JOIN games_details AS gd
+	ON pf.game_id = gd.game_id
+	WHERE gd.PLAYER_NAME ILIKE '%KEVIN DURANT%'
+  	AND pf.team = gd.team_abbreviation
+	GROUP BY pf.season
+),
+
+usage_rate AS (
+	SELECT i.player_name, i.season, 
+	SUM (ROUND ((total_FGA + 0.44 * total_FTA + total_turnover) / kd.total_possessions,2)) AS Usage_rate
+	FROM inputs AS i
+	JOIN kd_possessions AS kd
+	ON i.season = kd.season
+	WHERE i.player_name = 'Kevin Durant'
+	GROUP BY i.player_name, i.season
+	
+	UNION ALL
+	
+	SELECT i.player_name, i.season, 
+	SUM (ROUND ((total_FGA + 0.44 * total_FTA + total_turnover) / l.total_possessions,2)) AS Usage_rate 
+	FROM inputs AS i
+	JOIN lebron_possessions AS l
+	ON i.season = l.season
+	WHERE i.player_name = 'LeBron James'
+	GROUP BY i.player_name, i.season
+	
+	UNION ALL
+	
+	SELECT i.player_name, i.season, 
+	SUM (ROUND ((total_FGA + 0.44 * total_FTA + total_turnover) / c.total_possessions,2)) AS Usage_rate 
+	FROM inputs AS i
+	JOIN curry_possessions AS c 
+	ON i.season = c.season
+	WHERE i.player_name = 'Stephen Curry'
+	GROUP BY i.player_name, i.season
+),
+	
+teams_played AS (
+	SELECT DISTINCT g.season, gd.team_abbreviation
+	FROM games_details AS gd
+	JOIN games AS g
+	ON gd.game_id = g.game_id
+	WHERE gd.player_name IN ('Kevin Durant','Stephen Curry','LeBron James') 
+),
+
+teams_played_total_initial AS (
+	SELECT g.season, gd.TEAM_ABBREVIATION AS team, g.game_id,
+	SUM (gd.pts) AS team_total_points,
+	SUM (gd.AST) AS team_total_assists,
+	SUM (gd.REB) AS team_total_rebounds,
+	SUM (gd.STL) AS team_total_steals,
+	SUM (gd.BLK) AS team_total_blocks,
+	SUM (gd.TO) AS team_total_turnovers,
+	SUM (gd.PF) AS team_total_fouls,
+	SUM (gd.FGM) AS team_total_FGM,
+	SUM (gd.FGA) AS team_total_FGA,
+	SUM (gd.FTM) AS team_total_FTM,
+	SUM (gd.FTA) AS team_total_FTA,
+	SUM (gd.FG3M) AS team_total_3PM,
+	SUM (gd.FG3A) AS team_total_3PA
+	FROM games_details AS gd
+	JOIN games AS g
+	ON gd.game_id = g.game_id
+	JOIN teams_played AS tp
+	ON g.season = tp.season 
+	AND gd.team_abbreviation = tp.TEAM_ABBREVIATION
+	WHERE ((g.GAME_DATE_EST BETWEEN '2003-10-28' AND '2004-04-14')
+    OR (g.GAME_DATE_EST BETWEEN '2004-10-27' AND '2005-04-20')
+    OR (g.GAME_DATE_EST BETWEEN '2005-11-01' AND '2006-04-19')
+    OR (g.GAME_DATE_EST BETWEEN '2006-11-01' AND '2007-04-18')
+    OR (g.GAME_DATE_EST BETWEEN '2007-10-30' AND '2008-04-16')
+    OR (g.GAME_DATE_EST BETWEEN '2008-10-28' AND '2009-04-15')
+    OR (g.GAME_DATE_EST BETWEEN '2009-10-27' AND '2010-04-14')
+    OR (g.GAME_DATE_EST BETWEEN '2010-10-26' AND '2011-04-13')
+    OR (g.GAME_DATE_EST BETWEEN '2011-12-25' AND '2012-04-26')
+    OR (g.GAME_DATE_EST BETWEEN '2012-10-30' AND '2013-04-17')
+    OR (g.GAME_DATE_EST BETWEEN '2013-10-29' AND '2014-04-16')
+    OR (g.GAME_DATE_EST BETWEEN '2014-10-28' AND '2015-04-15')
+    OR (g.GAME_DATE_EST BETWEEN '2015-10-27' AND '2016-04-13')
+    OR (g.GAME_DATE_EST BETWEEN '2016-10-25' AND '2017-04-12')
+    OR (g.GAME_DATE_EST BETWEEN '2017-10-17' AND '2018-04-11')
+    OR (g.GAME_DATE_EST BETWEEN '2018-10-16' AND '2019-04-10')
+    OR (g.GAME_DATE_EST BETWEEN '2019-10-22' AND '2020-03-11')
+    OR (g.GAME_DATE_EST BETWEEN '2020-12-22' AND '2021-05-16')
+    OR (g.GAME_DATE_EST BETWEEN '2021-10-19' AND '2022-04-10') 
+	)
+	GROUP BY g.season, gd.TEAM_ABBREVIATION, g.game_id
+	ORDER BY g.season),
+
+teams_played_total AS (
+	SELECT season, team,
+	SUM (team_total_points) AS team_total_points,
+	SUM (team_total_assists) AS team_total_assists,
+	SUM (team_total_rebounds) AS team_total_rebounds,
+	SUM (team_total_steals) AS team_total_steals,
+	SUM (team_total_blocks) AS team_total_blocks,
+	SUM (team_total_turnovers) AS team_total_turnovers,
+	SUM (team_total_fouls) AS team_total_fouls,
+	SUM (team_total_FGM) AS team_total_FGM,
+	SUM (team_total_FGA) AS team_total_FGA,
+	SUM (team_total_FTM) AS team_total_FTM,
+	SUM (team_total_FTA) AS team_total_FTA,
+	SUM (team_total_3PM) AS team_total_3PM,
+	SUM (team_total_3PA) AS team_total_3PA
+	FROM teams_played_total_initial
+	GROUP BY season, team
+),
+	
+teams_played_stats AS (
+	SELECT season, team,
+	ROUND (AVG (team_total_points),2) AS PPG,
+	ROUND (AVG (team_total_assists),2) AS APG,
+	ROUND (AVG (team_total_rebounds),2) AS RPG,
+	ROUND (AVG (team_total_steals),2) AS SPG,
+	ROUND (AVG (team_total_blocks),2) AS BPG,
+	ROUND (AVG (team_total_turnovers),2) AS TOPG,
+	ROUND (AVG (team_total_fouls),2) AS PFPG
+	FROM teams_played_total_initial 
+	GROUP BY season, team
+	ORDER BY season),
+
+final_metrics AS (
+	SELECT i.player_name, 
+	i.season, 
+	i.team_abbreviation AS team, 
+	i.PPG, i.APG, i.RPG, i.SPG, i.BPG, i.TOPG, i.PFPG, games_played, c.career_FG, c.career_FT, c.career_3FG, 
+	t.PPG AS team_ppg, t.APG AS team_APG, t.RPG AS team_RPG, t.SPG AS team_SPG, t.BPG AS team_BPG, t.TOPG AS team_TOPG, t.PFPG AS team_PFPG,
+	ROUND (total_pts / (2 * (total_FGA + 0.44 * total_FTA)),2) AS true_shooting_pct,
+	ROUND ((total_FGM + 0.5 * total_3PM) / total_FGA,2) AS eFG_pct,
+	ROUND (total_turnover / (total_FGA + 0.44 * total_FTA + total_turnover),2) AS turnover_pct,
+	AVG_plus_minus,
+	ROUND (total_AST / total_turnover,2) AS Assist_turnover_ratio,
+	ROUND (total_pts / (total_FGA + 0.44 * total_FTA),2) AS Points_per_shot_attempt
